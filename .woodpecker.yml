@@ -1,0 +1,58 @@
+# Woodpecker CI pipeline — runs on every push / pull request.
+# Docs: https://woodpecker-ci.org/docs/usage/workflow-syntax
+
+when:
+  - event: [push, pull_request, manual]
+
+steps:
+  - name: lint
+    image: python:3.12-slim
+    commands:
+      - pip install --quiet --no-cache-dir -r requirements-dev.txt
+      - flake8 app tests --max-line-length=120
+
+  - name: test
+    image: python:3.12-slim
+    commands:
+      - pip install --quiet --no-cache-dir -r requirements-dev.txt
+      - pytest -v
+
+  # Builds the Docker image to prove it compiles. dry_run = do not push anywhere.
+  # Needs WOODPECKER_PLUGINS_PRIVILEGED=woodpeckerci/plugin-docker-buildx on the server (set in docker-compose.yml).
+  - name: build-image
+    image: woodpeckerci/plugin-docker-buildx
+    depends_on: [lint, test]
+    settings:
+      repo: demo/sample-app
+      tags:
+        - latest
+        - ${CI_COMMIT_SHA:0:8}
+      dry_run: true
+
+  # "Deploy" runs only for pushes to main, after everything above passed.
+  - name: deploy
+    image: alpine:3.20
+    depends_on: [build-image]
+    commands:
+      - echo "Deploying commit ${CI_COMMIT_SHA:0:8} from branch ${CI_COMMIT_BRANCH}"
+      - echo "Replace this step with a real deploy (see README, section 'Going further')."
+    when:
+      - event: push
+        branch: main
+
+  # --- Example real deploy over SSH (uncomment, add secrets in the Woodpecker UI) ---
+  # - name: deploy-ssh
+  #   image: appleboy/drone-ssh
+  #   depends_on: [build-image]
+  #   settings:
+  #     host:
+  #       from_secret: deploy_host
+  #     username:
+  #       from_secret: deploy_user
+  #     key:
+  #       from_secret: deploy_key
+  #     script:
+  #       - cd /opt/sample-app && git pull && docker compose up -d --build
+  #   when:
+  #     - event: push
+  #       branch: main
